@@ -41,12 +41,15 @@ def load_any(path: str) -> list:
     return load_addresses(path)
 
 
-def run_job(job_id: str, source_path: str, provider: str, mock: bool) -> None:
+def run_job(job_id: str, source_path: str, provider: str, mock: bool,
+            show_browser: bool = False) -> None:
     job = JOBS[job_id]
     try:
         if mock:
             os.environ["MOCK_AVAILABLE"] = "half"
         config = load_config("config.yaml")
+        if show_browser:
+            config.headless = False  # headful scores better against reCAPTCHA
         addresses = load_any(source_path)
         job["total_addresses"] = len(addresses)
 
@@ -108,13 +111,15 @@ def run():
 
     provider = request.form.get("provider", "kinetic")
     mock = request.form.get("mock") == "on"
+    show_browser = request.form.get("show_browser") == "on"
     JOBS[job_id] = {
         "status": "running", "provider": provider, "mock": mock,
         "filename": upload.filename, "done": 0, "total": 0, "total_addresses": 0,
         "counts": {}, "rows": [], "log": [], "results_path": "", "fresh_path": "", "error": "",
         "started": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
-    threading.Thread(target=run_job, args=(job_id, source_path, provider, mock),
+    threading.Thread(target=run_job,
+                     args=(job_id, source_path, provider, mock, show_browser),
                      daemon=True).start()
     return app.redirect(url_for("status_page", job_id=job_id))
 
@@ -169,6 +174,9 @@ pick a provider, and run. Results and fresh leads download as CSV.</p>
     <option value="att">AT&amp;T (needs unblocker)</option>
     <option value="all">All in footprint</option>
   </select>
+  <div class="check"><label style="display:inline;font-weight:400">
+    <input type="checkbox" name="show_browser" checked> Show browser (recommended for Kinetic, beats reCAPTCHA)
+  </label></div>
   <div class="check"><label style="display:inline;font-weight:400">
     <input type="checkbox" name="mock"> Test mode (no live checks, simulated output)
   </label></div>

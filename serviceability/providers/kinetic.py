@@ -15,6 +15,7 @@ defended compared to AT&T, so a warmed browser session is enough here.
 from __future__ import annotations
 
 import json
+import random
 from urllib.parse import urlparse
 
 from ..browser import BrowserSession, launch_session
@@ -122,11 +123,13 @@ class KineticChecker(ProviderChecker):
         if any(marker in page.content() for marker in BLOCK_MARKERS):
             raise Blocked("Kinetic challenge on load")
 
-        page.click(ADDRESS_INPUT_SELECTOR)
-        for ch in address.single_line():
-            page.keyboard.type(ch)
-            page.wait_for_timeout(60)
-        page.wait_for_timeout(3000)  # let the Precisely autocomplete resolve
+        # Kinetic scores the session with reCAPTCHA and shunts anything that looks
+        # automated to a /call-ris page. Behaving like a person (real mouse moves,
+        # real clicks, human typing cadence) is what keeps us on the real flow.
+        self._wander(page)
+        self._mouse_click(page, page.locator(ADDRESS_INPUT_SELECTOR).first)
+        self._human_type(page, address.single_line())
+        page.wait_for_timeout(random.randint(2600, 3800))  # autocomplete resolves
 
         api_body = None
         try:
@@ -179,7 +182,7 @@ class KineticChecker(ProviderChecker):
         """Click the autocomplete row that matches our street address."""
         token = address.address_line1.strip()
         try:
-            page.get_by_text(token, exact=False).first.click(timeout=5000)
+            self._mouse_click(page, page.get_by_text(token, exact=False).first)
             return
         except Exception:
             pass
@@ -192,9 +195,35 @@ class KineticChecker(ProviderChecker):
 
     def _click_check(self, page) -> None:
         try:
-            page.click(CHECK_BUTTON, timeout=4000)
+            self._mouse_click(page, page.locator(CHECK_BUTTON).first)
         except Exception:
             page.keyboard.press("Enter")
+
+    def _human_type(self, page, text: str) -> None:
+        """Type with a varied cadence rather than a fixed machine rhythm."""
+        for ch in text:
+            page.keyboard.type(ch)
+            page.wait_for_timeout(random.randint(45, 150))
+
+    def _mouse_click(self, page, locator) -> None:
+        """Move the mouse to an element and click it, the way a person would."""
+        locator.scroll_into_view_if_needed(timeout=5000)
+        box = locator.bounding_box()
+        if not box:
+            locator.click(timeout=5000)
+            return
+        x = box["x"] + box["width"] / 2
+        y = box["y"] + box["height"] / 2
+        page.mouse.move(x, y, steps=random.randint(6, 14))
+        page.wait_for_timeout(random.randint(120, 360))
+        page.mouse.click(x, y)
+
+    def _wander(self, page) -> None:
+        """A little aimless mouse movement before interacting, like a human."""
+        for _ in range(random.randint(2, 4)):
+            page.mouse.move(random.randint(200, 1000), random.randint(180, 600),
+                            steps=random.randint(5, 12))
+            page.wait_for_timeout(random.randint(150, 450))
 
     def _interpret(self, address: AddressInput, body: str) -> CheckResult:
         try:

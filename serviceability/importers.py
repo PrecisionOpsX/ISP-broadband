@@ -43,7 +43,7 @@ def has_house_number(line1: str) -> bool:
 
 def load_dealmachine(path: str, state: str | None = None,
                      limit: int | None = None,
-                     require_house_number: bool = True) -> list[AddressInput]:
+                     require_house_number: bool = False) -> list[AddressInput]:
     """Read a DealMachine contacts export into AddressInput rows.
 
     We check the associated property address, not the mailing address, because
