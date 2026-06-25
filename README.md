@@ -30,6 +30,23 @@ python -m playwright install chrome
 `python -m playwright install chrome` installs the real Chrome the checkers drive.
 If that is unavailable, `python -m playwright install chromium` also works.
 
+## Easiest way to run it: the local web UI
+
+If you would rather not use the command line, start the web UI:
+
+```
+python webapp/app.py
+```
+
+Then open http://localhost:5000 in a browser. Upload an address CSV (a
+DealMachine export or the simple format both work), pick a provider, and click
+Run. It shows live progress and gives you Download buttons for results.csv and
+fresh_leads.csv when finished. Tick "Test mode" to see the whole flow with
+simulated output and no live checks, which is useful for a quick demo or when you
+are not on a clean residential IP yet.
+
+The command-line steps below do the same thing and are better for large batches.
+
 ## Step 1: import the client's address file
 
 The client sends DealMachine exports. Convert one to the POC format, optionally
