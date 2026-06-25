@@ -81,7 +81,7 @@ class FrontierChecker(ProviderChecker):
                     pass
 
         page.on("response", record)
-        page.goto(HOME_URL, wait_until="domcontentloaded", timeout=45000)
+        self._safe_goto(page, HOME_URL)
         if any(marker in page.content() for marker in BLOCK_MARKERS):
             raise Blocked("Frontier challenge on load")
 
@@ -97,6 +97,22 @@ class FrontierChecker(ProviderChecker):
                 break
             page.wait_for_timeout(500)
         return captured, page
+
+    def _safe_goto(self, page, url: str) -> None:
+        """frontier.com occasionally aborts its own load when the page is reused
+        between addresses. That is transient, so retry a couple of times."""
+        last = None
+        for _ in range(3):
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                return
+            except Exception as exc:
+                last = exc
+                if "ERR_ABORTED" in str(exc) or "navigation" in str(exc).lower():
+                    page.wait_for_timeout(1500)
+                    continue
+                raise
+        raise Blocked(f"Frontier navigation kept aborting: {last}")
 
     def _pick_suggestion(self, page, address: AddressInput) -> None:
         try:

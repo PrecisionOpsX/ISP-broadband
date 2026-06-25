@@ -106,8 +106,10 @@ class KineticChecker(ProviderChecker):
         page.wait_for_timeout(3000)  # let the Precisely autocomplete resolve
 
         try:
+            # buy.gokinetic plays a "checking availability" map animation for up
+            # to ~10s before the qualification call resolves, so give it room.
             with page.expect_response(
-                lambda r: SEARCH_API_HINT in r.url, timeout=10000
+                lambda r: SEARCH_API_HINT in r.url, timeout=20000
             ) as info:
                 self._pick_suggestion(page, address)
                 self._click_check(page)
