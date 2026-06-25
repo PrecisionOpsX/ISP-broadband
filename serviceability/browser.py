@@ -113,3 +113,32 @@ def launch_session(headless: bool = True, proxy: str | None = None,
     page = context.new_page()
     page.set_default_timeout(20000)  # cap element waits so a failure cannot hang
     return BrowserSession(playwright=pw, browser=browser, context=context, page=page)
+
+
+def launch_persistent_session(user_data_dir: str, headless: bool = True,
+                              proxy: str | None = None,
+                              user_agent: str = DEFAULT_UA) -> BrowserSession:
+    """Like launch_session but with an on-disk profile that keeps cookies across
+    runs. Some sites route a cold, cookieless session (an incognito-like context)
+    to a dead end; a persistent, warmed profile reads as a returning visitor.
+    """
+    require_playwright()
+    pw = sync_playwright().start()
+    args = {
+        "headless": headless,
+        "user_agent": user_agent,
+        "viewport": {"width": 1366, "height": 768},
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+        "args": ["--disable-blink-features=AutomationControlled"],
+    }
+    if proxy:
+        args["proxy"] = _proxy_config(proxy)
+    try:
+        context = pw.chromium.launch_persistent_context(user_data_dir, channel="chrome", **args)
+    except Exception:
+        context = pw.chromium.launch_persistent_context(user_data_dir, **args)
+    context.add_init_script(EVASION_SCRIPT)
+    page = context.pages[0] if context.pages else context.new_page()
+    page.set_default_timeout(20000)
+    return BrowserSession(playwright=pw, browser=None, context=context, page=page)

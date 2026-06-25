@@ -15,15 +15,21 @@ defended compared to AT&T, so a warmed browser session is enough here.
 from __future__ import annotations
 
 import json
+import os
 import random
 from urllib.parse import urlparse
 
-from ..browser import BrowserSession, launch_session
+from ..browser import BrowserSession, launch_persistent_session
 from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy, with_retries
 
+HOME_URL = "https://www.gokinetic.com/"
 BUY_URL = "https://buy.gokinetic.com/"
+PROFILE_DIR = "data/kinetic_profile"
+COOKIE_ACCEPT = ("#onetrust-accept-btn-handler", "button:has-text('Accept All')",
+                 "button:has-text('Accept')", "button:has-text('I Agree')",
+                 "button:has-text('Got it')")
 ADDRESS_INPUT_SELECTOR = "#Address, input[name='address']"
 SEARCH_API_HINT = "/api/v1/address/search"
 CHECK_BUTTON = ("button:has-text('available'), button:has-text('Check'), "
@@ -60,12 +66,37 @@ class KineticChecker(ProviderChecker):
 
     def _ensure_session(self) -> BrowserSession:
         if self._session is None:
-            self._session = launch_session(headless=self.headless, proxy=self.proxy)
+            self._session = launch_persistent_session(
+                os.path.abspath(PROFILE_DIR), headless=self.headless, proxy=self.proxy)
+            self._warm()
         return self._session
 
     def _rotate(self, attempt: int) -> None:
         self.close()
-        self._session = launch_session(headless=self.headless, proxy=self.proxy)
+        self._session = launch_persistent_session(
+            os.path.abspath(PROFILE_DIR), headless=self.headless, proxy=self.proxy)
+        self._warm()
+
+    def _warm(self) -> None:
+        """Visit the homepage and accept the cookie banner so the session looks
+        like a returning visitor. A cold session is routed to /call-ris."""
+        page = self._session.page
+        try:
+            page.goto(HOME_URL, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(2500)
+            self._accept_cookies(page)
+            page.wait_for_timeout(1500)
+        except Exception:
+            pass
+
+    def _accept_cookies(self, page) -> None:
+        for selector in COOKIE_ACCEPT:
+            try:
+                page.click(selector, timeout=2000)
+                page.wait_for_timeout(500)
+                return
+            except Exception:
+                continue
 
     def check(self, address: AddressInput) -> CheckResult:
         self.pacing.wait_between_requests()
@@ -122,6 +153,7 @@ class KineticChecker(ProviderChecker):
         page.goto(BUY_URL, wait_until="domcontentloaded", timeout=45000)
         if any(marker in page.content() for marker in BLOCK_MARKERS):
             raise Blocked("Kinetic challenge on load")
+        self._accept_cookies(page)
 
         # Kinetic scores the session with reCAPTCHA and shunts anything that looks
         # automated to a /call-ris page. Behaving like a person (real mouse moves,
