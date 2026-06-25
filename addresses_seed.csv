@@ -1,0 +1,17 @@
+address_id,address_line1,unit,city,state,zip,note
+att-001,2440 Victory Park Ln,,Dallas,TX,75219,AT&T fiber metro
+att-002,1080 Peachtree St NE,,Atlanta,GA,30309,AT&T fiber metro
+att-003,1600 Lamar St,,Houston,TX,77010,AT&T fiber metro
+att-004,1212 Laurel St,,Nashville,TN,37203,AT&T fiber metro
+att-005,300 W Tremont Ave,,Charlotte,NC,28203,AT&T fiber metro
+att-006,1431 Riverplace Blvd,,Jacksonville,FL,32207,AT&T fiber metro
+att-007,889 Francisco St,,Los Angeles,CA,90017,AT&T fiber metro
+att-008,2007 Manor Rd,,Austin,TX,78722,AT&T fiber metro
+kin-001,650 Newtown Pike,,Lexington,KY,40508,Kinetic/Windstream fiber town
+kin-002,233 S 13th St,,Lincoln,NE,68508,Kinetic/Windstream fiber town
+kin-003,150 N Country Club Rd,,Lake Mary,FL,32746,Kinetic/Windstream fiber town
+kin-004,1201 E Center St,,Kingsport,TN,37660,Kinetic/Windstream fiber town
+kin-005,1311 College St,,Bowling Green,KY,42101,Kinetic/Windstream fiber town
+kin-006,500 President Clinton Ave,,Little Rock,AR,72201,Kinetic/Windstream fiber town
+kin-007,1075 Bridgewater Dr,,Conway,AR,72034,Kinetic/Windstream fiber town
+kin-008,425 Town Center Blvd,,Sugar Land,TX,77478,Kinetic/Windstream fiber town

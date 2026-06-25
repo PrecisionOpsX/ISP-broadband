@@ -1,0 +1,27 @@
+# Copy to config.yaml and edit. Running without a config file uses these defaults.
+
+headless: true
+db_path: data/serviceability.db
+request_timeout_seconds: 30
+
+# Residential or rotating proxies. One warmed browser identity is bound to each.
+# Leave empty for a direct connection (fine for a small local test, not for scale).
+proxies: []
+#  - http://user:pass@host:port
+#  - http://user:pass@host2:port
+
+# Conservative pacing. Relax for speed once proxies are in place, tighten if blocked.
+pacing:
+  min_delay_seconds: 4.0
+  max_delay_seconds: 9.0
+  max_retries: 4
+  backoff_base_seconds: 5.0
+  backoff_cap_seconds: 90.0
+
+# Commercial unblocker for AT&T only (Akamai). Leave enabled false until you have
+# a key. When enabled, the AT&T checker routes its browser through this proxy.
+# Bright Data Web Unlocker and Oxylabs Web Unblocker both work as a proxy string.
+unblocker:
+  enabled: false
+  provider: brightdata
+  proxy: ""   # e.g. http://brd-customer-XXXX-zone-YYYY:PASSWORD@brd.superproxy.io:22225
