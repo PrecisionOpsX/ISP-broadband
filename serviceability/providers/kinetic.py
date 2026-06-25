@@ -68,33 +68,42 @@ class KineticChecker(ProviderChecker):
             except Exception as exc:
                 return CheckResult(
                     address=address, provider=self.name,
-                    category=ResultCategory.UNABLE_TO_VERIFY, raw_status="blocked",
-                    notes=f"{exc}. Use a clean residential IP or a proxy."[:250],
+                    category=ResultCategory.UNABLE_TO_VERIFY, raw_status="error",
+                    notes=str(exc)[:250],
                 )
 
         return with_retries(self.pacing, lambda: self._attempt(address), on_block=self._rotate)
 
     def _attempt(self, address: AddressInput) -> CheckResult:
         session = self._ensure_session()
-        body = self._lookup(session, address)
-        if body is not None:
-            return self._interpret(address, body)
-        if self._soft_blocked(session.page):
-            raise Blocked("Kinetic routed to call fallback (likely IP rate limit)")
-        dom_result = self._interpret_dom(address, session.page)
-        if dom_result is not None:
-            return dom_result
-        raise Blocked("no qualification response from Kinetic")
-
-    def _lookup(self, session: BrowserSession, address: AddressInput) -> str | None:
-        """Drive the buy flow and return the address/search qualification JSON.
-
-        The qualification call fires and the page navigates to the result view in
-        almost the same instant, so we hold the response with expect_response,
-        which keeps the body readable across that navigation. The plain response
-        listener used to lose the body in that race, which read as Unable to Verify.
-        """
         page = session.page
+        api_body = self._drive(page, address)
+        verdict = self._page_verdict(page)
+
+        if verdict == "available":
+            # If we also caught the API, use it for the exact speed; otherwise
+            # the result page itself is enough to call it available.
+            if api_body:
+                parsed = self._interpret(address, api_body)
+                if parsed.category in (ResultCategory.FIBER_AVAILABLE,
+                                       ResultCategory.EXISTING_CUSTOMER):
+                    return parsed
+            return CheckResult(address=address, provider=self.name,
+                               category=ResultCategory.FIBER_AVAILABLE,
+                               technology="Fiber", raw_status="dom")
+        if verdict == "unavailable":
+            return CheckResult(address=address, provider=self.name,
+                               category=ResultCategory.NOT_AVAILABLE, raw_status="dom")
+        if api_body:
+            return self._interpret(address, api_body)
+        raise Blocked("could not read a verdict from the Kinetic result page")
+
+    def _drive(self, page, address: AddressInput) -> str | None:
+        """Run the buy flow and return the qualification JSON if we catch it.
+
+        The verdict is read from the result page, which is the source of truth a
+        human sees. The API body is a best-effort bonus used to enrich the speed.
+        """
         page.goto(BUY_URL, wait_until="domcontentloaded", timeout=45000)
         if any(marker in page.content() for marker in BLOCK_MARKERS):
             raise Blocked("Kinetic challenge on load")
@@ -105,46 +114,49 @@ class KineticChecker(ProviderChecker):
             page.wait_for_timeout(60)
         page.wait_for_timeout(3000)  # let the Precisely autocomplete resolve
 
+        api_body = None
         try:
             # buy.gokinetic plays a "checking availability" map animation for up
-            # to ~10s before the qualification call resolves, so give it room.
+            # to ~10s, so give the qualification call room to resolve.
             with page.expect_response(
                 lambda r: SEARCH_API_HINT in r.url, timeout=20000
             ) as info:
                 self._pick_suggestion(page, address)
                 self._click_check(page)
             response = info.value
+            if response.status < 400:
+                api_body = response.text()
         except Exception:
-            return None
+            pass  # the submit still happened; we read the verdict from the page
 
-        if response.status >= 400:
-            raise Blocked(f"Kinetic search returned {response.status}")
-        try:
-            return response.text()
-        except Exception:
-            return None
+        self._wait_for_result(page)
+        return api_body
 
-    def _interpret_dom(self, address: AddressInput, page) -> CheckResult | None:
-        """Read the verdict off the result page when the API was not captured."""
+    def _wait_for_result(self, page) -> None:
+        """Wait for the result page to actually render a verdict."""
+        for _ in range(30):  # up to ~15s past the submit
+            if self._page_verdict(page) is not None:
+                return
+            page.wait_for_timeout(500)
+
+    def _page_verdict(self, page) -> str | None:
+        """Read the result page the way a person would. The "this address
+        currently has kinetic service" page and a fiber plans page both mean
+        available; a "not available / sorry" message means not available."""
         try:
             text = page.inner_text("body").lower()
         except Exception:
             return None
-        if any(k in text for k in ("not available", "not currently", "no service", "sorry")):
-            return CheckResult(address=address, provider=self.name,
-                               category=ResultCategory.NOT_AVAILABLE, raw_status="dom")
-        if "fiber" in text and any(k in text for k in ("gig", "/mo", "add to cart", "plans")):
-            return CheckResult(address=address, provider=self.name,
-                               category=ResultCategory.FIBER_AVAILABLE,
-                               technology="Fiber", raw_status="dom")
+        available = (
+            ("kinetic service" in text and ("view plans" in text or "currently has" in text))
+            or ("fiber" in text and any(k in text for k in ("add to cart", "gig", "/mo", "great news")))
+        )
+        if available:
+            return "available"
+        if any(k in text for k in ("not available", "no service", "sorry",
+                                   "isn't available", "not currently", "unable to service")):
+            return "unavailable"
         return None
-
-    @staticmethod
-    def _soft_blocked(page) -> bool:
-        # When Kinetic suspects automation it routes the address submit to a
-        # "call us" page instead of running the qualification API. A fresh proxy
-        # identity clears it, so we surface it as a block to rotate on.
-        return "call-ris" in page.url or "/call" in page.url
 
     def _pick_suggestion(self, page, address: AddressInput) -> None:
         """Click the autocomplete row that matches our street address."""
