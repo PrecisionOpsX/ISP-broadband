@@ -34,8 +34,16 @@ def parse_full_address(full: str) -> tuple[str, str, str, str]:
     return line1, city, state, zip_code
 
 
+def has_house_number(line1: str) -> bool:
+    """A checkable street address starts with a house number. Rows like
+    "Lick Br" or just "Combs" cannot resolve, so we skip them."""
+    line1 = line1.strip()
+    return bool(line1) and line1[0].isdigit()
+
+
 def load_dealmachine(path: str, state: str | None = None,
-                     limit: int | None = None) -> list[AddressInput]:
+                     limit: int | None = None,
+                     require_house_number: bool = True) -> list[AddressInput]:
     """Read a DealMachine contacts export into AddressInput rows.
 
     We check the associated property address, not the mailing address, because
@@ -52,6 +60,8 @@ def load_dealmachine(path: str, state: str | None = None,
                 continue
             line1, city, st, zip_code = parse_full_address(full)
             if not (line1 and st and zip_code):
+                continue
+            if require_house_number and not has_house_number(line1):
                 continue
             if state and st != state.upper():
                 continue

@@ -67,6 +67,12 @@ def run_job(job_id: str, source_path: str, provider: str, mock: bool) -> None:
                     job["done"] += 1
                     key = result.category.value
                     job["counts"][key] = job["counts"].get(key, 0) + 1
+                    job["rows"].append({
+                        "address": address.single_line(),
+                        "provider": checker.name,
+                        "category": key,
+                        "reason": (result.notes or result.raw_status or "")[:160],
+                    })
             finally:
                 checker.close()
 
@@ -105,7 +111,7 @@ def run():
     JOBS[job_id] = {
         "status": "running", "provider": provider, "mock": mock,
         "filename": upload.filename, "done": 0, "total": 0, "total_addresses": 0,
-        "counts": {}, "log": [], "results_path": "", "fresh_path": "", "error": "",
+        "counts": {}, "rows": [], "log": [], "results_path": "", "fresh_path": "", "error": "",
         "started": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
     threading.Thread(target=run_job, args=(job_id, source_path, provider, mock),
@@ -193,6 +199,8 @@ table{border-collapse:collapse;margin-top:14px} td,th{border-bottom:1px solid #e
 <p class="muted">{{job.filename}} &middot; started {{job.started}}</p>
 <div id="body"></div>
 <script>
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function catColor(c){ return c=='Fiber Available'?'#0a7':(c=='Not Available'?'#555':(c=='Existing Customer'?'#06c':'#c60')); }
 async function tick(){
   const r = await fetch("/status/{{job_id}}.json"); const j = await r.json();
   let html = "";
@@ -204,6 +212,18 @@ async function tick(){
     html += '<table><tr><th>Category</th><th>Count</th></tr>';
     for(const k in j.counts){ html += '<tr><td>'+k+'</td><td>'+j.counts[k]+'</td></tr>'; }
     html += '</table>';
+  }
+  if(j.rows && j.rows.length){
+    html += '<h3 style="font-size:15px;margin:22px 0 6px">Per-address log ('+j.rows.length+')</h3>';
+    html += '<div style="max-height:360px;overflow:auto;border:1px solid #eee;border-radius:6px">';
+    html += '<table style="margin:0;font-size:13px"><tr>'+
+            '<th>#</th><th>Address</th><th>Category</th><th>Reason</th></tr>';
+    j.rows.forEach((r,i)=>{
+      html += '<tr><td class="muted">'+(i+1)+'</td><td>'+esc(r.address)+'</td>'+
+              '<td style="color:'+catColor(r.category)+'">'+esc(r.category)+'</td>'+
+              '<td class="muted">'+esc(r.reason)+'</td></tr>';
+    });
+    html += '</table></div>';
   }
   if(j.status=='done'){
     html += '<p><a class="dl" href="/download/{{job_id}}/results">Download results.csv</a>'+

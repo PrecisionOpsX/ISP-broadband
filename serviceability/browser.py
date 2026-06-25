@@ -65,6 +65,21 @@ class BrowserSession:
             pass
 
 
+def _proxy_config(proxy: str) -> dict:
+    """Turn a proxy URL into Playwright's proxy dict.
+
+    Residential proxies are almost always authenticated, and Playwright wants the
+    credentials split out from the server, not left embedded in the URL.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy if "://" in proxy else "http://" + proxy)
+    config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+    if parsed.username:
+        config["username"] = parsed.username
+        config["password"] = parsed.password or ""
+    return config
+
+
 def require_playwright() -> None:
     if sync_playwright is None:
         raise RuntimeError(
@@ -80,7 +95,7 @@ def launch_session(headless: bool = True, proxy: str | None = None,
     pw = sync_playwright().start()
     base_args = {"headless": headless, "args": ["--disable-blink-features=AutomationControlled"]}
     if proxy:
-        base_args["proxy"] = {"server": proxy}
+        base_args["proxy"] = _proxy_config(proxy)
     # The installed real Chrome launches reliably here and is harder to detect
     # than the bundled Chromium build. Fall back to Chromium if Chrome is absent.
     try:
