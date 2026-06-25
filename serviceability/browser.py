@@ -96,4 +96,5 @@ def launch_session(headless: bool = True, proxy: str | None = None,
     )
     context.add_init_script(EVASION_SCRIPT)
     page = context.new_page()
+    page.set_default_timeout(20000)  # cap element waits so a failure cannot hang
     return BrowserSession(playwright=pw, browser=browser, context=context, page=page)

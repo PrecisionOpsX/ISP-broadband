@@ -59,21 +59,32 @@ class KineticChecker(ProviderChecker):
     def check(self, address: AddressInput) -> CheckResult:
         self.pacing.wait_between_requests()
 
-        def do_check() -> CheckResult:
-            session = self._ensure_session()
-            body = self._lookup(session, address)
-            if body is not None:
-                return self._interpret(address, body)
-            # The API response was missed. Rotate if we were soft blocked,
-            # otherwise read the verdict straight off the result page.
-            if self._soft_blocked(session.page):
-                raise Blocked("Kinetic routed to call fallback (likely IP rate limit)")
-            dom_result = self._interpret_dom(address, session.page)
-            if dom_result is not None:
-                return dom_result
-            raise Blocked("no qualification response from Kinetic")
+        # Retrying and rotating only helps when there is another proxy identity to
+        # rotate to. With no proxy, a blocked IP stays blocked, so one attempt and
+        # a clear note beats spawning a fresh browser on every retry.
+        if self.proxy is None:
+            try:
+                return self._attempt(address)
+            except Exception as exc:
+                return CheckResult(
+                    address=address, provider=self.name,
+                    category=ResultCategory.UNABLE_TO_VERIFY, raw_status="blocked",
+                    notes=f"{exc}. Use a clean residential IP or a proxy."[:250],
+                )
 
-        return with_retries(self.pacing, do_check, on_block=self._rotate)
+        return with_retries(self.pacing, lambda: self._attempt(address), on_block=self._rotate)
+
+    def _attempt(self, address: AddressInput) -> CheckResult:
+        session = self._ensure_session()
+        body = self._lookup(session, address)
+        if body is not None:
+            return self._interpret(address, body)
+        if self._soft_blocked(session.page):
+            raise Blocked("Kinetic routed to call fallback (likely IP rate limit)")
+        dom_result = self._interpret_dom(address, session.page)
+        if dom_result is not None:
+            return dom_result
+        raise Blocked("no qualification response from Kinetic")
 
     def _lookup(self, session: BrowserSession, address: AddressInput) -> str | None:
         """Drive the buy flow and return the address/search qualification JSON.
@@ -96,7 +107,7 @@ class KineticChecker(ProviderChecker):
 
         try:
             with page.expect_response(
-                lambda r: SEARCH_API_HINT in r.url, timeout=25000
+                lambda r: SEARCH_API_HINT in r.url, timeout=10000
             ) as info:
                 self._pick_suggestion(page, address)
                 self._click_check(page)
