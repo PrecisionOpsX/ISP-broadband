@@ -60,26 +60,30 @@ class KineticChecker(ProviderChecker):
         self.pacing.wait_between_requests()
 
         def do_check() -> CheckResult:
-            body = self._lookup(self._ensure_session(), address)
-            if body is None:
-                raise Blocked("no qualification response from Kinetic")
-            return self._interpret(address, body)
+            session = self._ensure_session()
+            body = self._lookup(session, address)
+            if body is not None:
+                return self._interpret(address, body)
+            # The API response was missed. Rotate if we were soft blocked,
+            # otherwise read the verdict straight off the result page.
+            if self._soft_blocked(session.page):
+                raise Blocked("Kinetic routed to call fallback (likely IP rate limit)")
+            dom_result = self._interpret_dom(address, session.page)
+            if dom_result is not None:
+                return dom_result
+            raise Blocked("no qualification response from Kinetic")
 
         return with_retries(self.pacing, do_check, on_block=self._rotate)
 
     def _lookup(self, session: BrowserSession, address: AddressInput) -> str | None:
-        """Drive the buy flow and return the address/search qualification JSON."""
+        """Drive the buy flow and return the address/search qualification JSON.
+
+        The qualification call fires and the page navigates to the result view in
+        almost the same instant, so we hold the response with expect_response,
+        which keeps the body readable across that navigation. The plain response
+        listener used to lose the body in that race, which read as Unable to Verify.
+        """
         page = session.page
-        captured: list[str] = []
-
-        def record(response):
-            if SEARCH_API_HINT in response.url:
-                try:
-                    captured.append(response.text())
-                except Exception:
-                    pass
-
-        page.on("response", record)
         page.goto(BUY_URL, wait_until="domcontentloaded", timeout=45000)
         if any(marker in page.content() for marker in BLOCK_MARKERS):
             raise Blocked("Kinetic challenge on load")
@@ -89,17 +93,38 @@ class KineticChecker(ProviderChecker):
             page.keyboard.type(ch)
             page.wait_for_timeout(60)
         page.wait_for_timeout(3000)  # let the Precisely autocomplete resolve
-        self._pick_suggestion(page, address)
-        self._click_check(page)
 
-        # the qualification call fires after the address resolves
-        for _ in range(24):
-            if captured:
-                break
-            page.wait_for_timeout(500)
-        if not captured and self._soft_blocked(page):
-            raise Blocked("Kinetic routed to call fallback (likely IP rate limit)")
-        return captured[-1] if captured else None
+        try:
+            with page.expect_response(
+                lambda r: SEARCH_API_HINT in r.url, timeout=25000
+            ) as info:
+                self._pick_suggestion(page, address)
+                self._click_check(page)
+            response = info.value
+        except Exception:
+            return None
+
+        if response.status >= 400:
+            raise Blocked(f"Kinetic search returned {response.status}")
+        try:
+            return response.text()
+        except Exception:
+            return None
+
+    def _interpret_dom(self, address: AddressInput, page) -> CheckResult | None:
+        """Read the verdict off the result page when the API was not captured."""
+        try:
+            text = page.inner_text("body").lower()
+        except Exception:
+            return None
+        if any(k in text for k in ("not available", "not currently", "no service", "sorry")):
+            return CheckResult(address=address, provider=self.name,
+                               category=ResultCategory.NOT_AVAILABLE, raw_status="dom")
+        if "fiber" in text and any(k in text for k in ("gig", "/mo", "add to cart", "plans")):
+            return CheckResult(address=address, provider=self.name,
+                               category=ResultCategory.FIBER_AVAILABLE,
+                               technology="Fiber", raw_status="dom")
+        return None
 
     @staticmethod
     def _soft_blocked(page) -> bool:
