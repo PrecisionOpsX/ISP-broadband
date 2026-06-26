@@ -18,10 +18,10 @@ import json
 import random
 from urllib.parse import urlparse
 
-from ..browser import BrowserSession, launch_session
+from ..browser import BrowserSession, launch_session, random_fingerprint
 from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
-from ..pacing import Blocked, PacingPolicy, with_retries
+from ..pacing import Blocked, PacingPolicy
 
 BUY_URL = "https://buy.gokinetic.com/"
 COOKIE_ACCEPT = ("#onetrust-accept-btn-handler", "button:has-text('Accept All')",
@@ -38,7 +38,6 @@ BLOCK_MARKERS = ("Access Denied", "Request unsuccessful", "Pardon Our Interrupti
 LOADING_PATH = "check-in-progress"
 RESULT_PAGES = [
     ("email-collection", ResultCategory.FIBER_AVAILABLE, "Fiber", "available, email collection step"),
-    ("call-ris", ResultCategory.FIBER_AVAILABLE, "Fiber", "call-to-order page (A/B variant), serviceable"),
     ("existing-account", ResultCategory.EXISTING_CUSTOMER, "", "address already has Kinetic service"),
     ("complete-address", ResultCategory.UNABLE_TO_VERIFY, "", "address incomplete or zip/state mismatch"),
 ]
@@ -60,16 +59,6 @@ class KineticChecker(ProviderChecker):
         self.headless = headless
         self.proxy = proxy
         self.pacing = pacing or PacingPolicy()
-        self._session: BrowserSession | None = None
-
-    def _ensure_session(self) -> BrowserSession:
-        if self._session is None:
-            self._session = launch_session(headless=self.headless, proxy=self.proxy)
-        return self._session
-
-    def _rotate(self, attempt: int) -> None:
-        self.close()
-        self._session = launch_session(headless=self.headless, proxy=self.proxy)
 
     def _accept_cookies(self, page) -> None:
         for selector in COOKIE_ACCEPT:
@@ -83,35 +72,47 @@ class KineticChecker(ProviderChecker):
     def check(self, address: AddressInput) -> CheckResult:
         self.pacing.wait_between_requests()
 
-        # Retrying and rotating only helps when there is another proxy identity to
-        # rotate to. With no proxy, a blocked IP stays blocked, so one attempt and
-        # a clear note beats spawning a fresh browser on every retry.
-        if self.proxy is None:
+        # Kinetic shows /call-ris (a "call to order" page) once it has seen several
+        # requests from the same identity. So every attempt uses a brand-new
+        # browser identity, and with a rotating proxy a new IP too. On /call-ris we
+        # retry with a fresh identity rather than trusting the page.
+        attempts = max(1, self.pacing.max_retries)
+        result = None
+        for attempt in range(attempts):
+            session = None
             try:
-                result = self._attempt(address)
+                session = launch_session(headless=self.headless, proxy=self.proxy,
+                                         fingerprint=random_fingerprint())
+                result = self._run(session, address)
+                result.final_url = session.page.url
             except Exception as exc:
-                result = CheckResult(
-                    address=address, provider=self.name,
-                    category=ResultCategory.UNABLE_TO_VERIFY, raw_status="error",
-                    notes=str(exc)[:250],
-                )
-        else:
-            result = with_retries(self.pacing, lambda: self._attempt(address),
-                                  on_block=self._rotate)
-        result.final_url = self._current_url()
+                result = CheckResult(address=address, provider=self.name,
+                                     category=ResultCategory.UNABLE_TO_VERIFY,
+                                     raw_status="error", notes=str(exc)[:250])
+                try:
+                    result.final_url = session.page.url if session else ""
+                except Exception:
+                    pass
+            finally:
+                if session is not None:
+                    session.close()
+
+            if result.raw_status != "call-ris":
+                return result
+            if attempt < attempts - 1:
+                self.pacing.wait_between_requests()  # cool down before a fresh identity
         return result
 
-    def _current_url(self) -> str:
-        try:
-            return self._session.page.url
-        except Exception:
-            return ""
-
-    def _attempt(self, address: AddressInput) -> CheckResult:
-        session = self._ensure_session()
+    def _run(self, session: BrowserSession, address: AddressInput) -> CheckResult:
         page = session.page
         api_body = self._drive(page, address)
         path = urlparse(page.url).path.lower()
+
+        # /call-ris is the rate-limit page, not a verdict. Signal a retry.
+        if "call-ris" in path:
+            return CheckResult(address=address, provider=self.name,
+                               category=ResultCategory.UNABLE_TO_VERIFY, raw_status="call-ris",
+                               notes="Kinetic rate-limited this identity (call-to-order page)")
 
         # The result page URL is the verdict. Map the confirmed ones first.
         for marker, category, technology, note in RESULT_PAGES:
@@ -136,7 +137,9 @@ class KineticChecker(ProviderChecker):
                                category=ResultCategory.NOT_AVAILABLE, raw_status=path or "dom")
         if api_body:
             return self._interpret(address, api_body)
-        raise Blocked(f"unrecognized Kinetic result page: /{path.strip('/') or 'no-redirect'}")
+        return CheckResult(address=address, provider=self.name,
+                           category=ResultCategory.UNABLE_TO_VERIFY, raw_status="no_verdict",
+                           notes=f"unrecognized result page: /{path.strip('/') or 'none'}")
 
     def _drive(self, page, address: AddressInput) -> str | None:
         """Run the buy flow, wait for the result redirect, and return the
@@ -280,26 +283,24 @@ class KineticChecker(ProviderChecker):
 
     def confirm_endpoint(self, address: AddressInput) -> list[dict]:
         """Recon helper: capture the qualification request for this address."""
-        session = self._ensure_session()
+        session = launch_session(headless=self.headless, proxy=self.proxy,
+                                 fingerprint=random_fingerprint())
         captured: list[dict] = []
 
         def record(request):
             if SEARCH_API_HINT in request.url:
-                body = None
                 try:
                     body = request.post_data
                 except Exception:
                     body = "<binary>"
                 captured.append({"url": request.url, "method": request.method, "body": body})
 
-        session.page.on("request", record)
-        self._lookup(session, address)
+        try:
+            session.page.on("request", record)
+            self._drive(session.page, address)
+        finally:
+            session.close()
         return captured
-
-    def close(self) -> None:
-        if self._session is not None:
-            self._session.close()
-            self._session = None
 
 
 def _dig(data: dict, *keys):

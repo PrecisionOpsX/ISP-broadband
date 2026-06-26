@@ -12,6 +12,7 @@ comparison, CSV) runs and tests without a browser installed.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 
 # Prefer patchright (a stealth-patched Playwright) since it defeats the CDP
@@ -33,6 +34,31 @@ DEFAULT_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+# Pools used to vary the browser identity per request, so a site that rate-limits
+# a repeated device fingerprint sees a different one each time.
+_USER_AGENTS = [
+    DEFAULT_UA,
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+     "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+     "(KHTML, like Gecko) Version/17.4 Safari/605.1.15"),
+]
+_VIEWPORTS = [(1366, 768), (1440, 900), (1536, 864), (1920, 1080), (1280, 720)]
+_TIMEZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"]
+
+
+def random_fingerprint() -> dict:
+    """A randomized browser identity (user agent, viewport, timezone)."""
+    width, height = random.choice(_VIEWPORTS)
+    return {
+        "user_agent": random.choice(_USER_AGENTS),
+        "viewport": {"width": width, "height": height},
+        "timezone_id": random.choice(_TIMEZONES),
+        "locale": "en-US",
+    }
 
 # Light evasions for the most obvious headless tells. For production hardening,
 # layer playwright-stealth on top of this; the hook is install_evasions().
@@ -90,7 +116,8 @@ def require_playwright() -> None:
 
 def launch_session(headless: bool = True, proxy: str | None = None,
                    user_agent: str = DEFAULT_UA,
-                   ignore_https_errors: bool = False) -> BrowserSession:
+                   ignore_https_errors: bool = False,
+                   fingerprint: dict | None = None) -> BrowserSession:
     require_playwright()
     pw = sync_playwright().start()
     base_args = {"headless": headless, "args": ["--disable-blink-features=AutomationControlled"]}
@@ -102,11 +129,12 @@ def launch_session(headless: bool = True, proxy: str | None = None,
         browser = pw.chromium.launch(channel="chrome", **base_args)
     except Exception:
         browser = pw.chromium.launch(**base_args)
+    fp = fingerprint or {}
     context = browser.new_context(
-        user_agent=user_agent,
-        viewport={"width": 1366, "height": 768},
-        locale="en-US",
-        timezone_id="America/New_York",
+        user_agent=fp.get("user_agent", user_agent),
+        viewport=fp.get("viewport", {"width": 1366, "height": 768}),
+        locale=fp.get("locale", "en-US"),
+        timezone_id=fp.get("timezone_id", "America/New_York"),
         ignore_https_errors=ignore_https_errors,
     )
     context.add_init_script(EVASION_SCRIPT)
