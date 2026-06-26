@@ -15,18 +15,15 @@ defended compared to AT&T, so a warmed browser session is enough here.
 from __future__ import annotations
 
 import json
-import os
 import random
 from urllib.parse import urlparse
 
-from ..browser import BrowserSession, launch_persistent_session
+from ..browser import BrowserSession, launch_session
 from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy, with_retries
 
-HOME_URL = "https://www.gokinetic.com/"
 BUY_URL = "https://buy.gokinetic.com/"
-PROFILE_DIR = "data/kinetic_profile"
 COOKIE_ACCEPT = ("#onetrust-accept-btn-handler", "button:has-text('Accept All')",
                  "button:has-text('Accept')", "button:has-text('I Agree')",
                  "button:has-text('Got it')")
@@ -41,6 +38,7 @@ BLOCK_MARKERS = ("Access Denied", "Request unsuccessful", "Pardon Our Interrupti
 LOADING_PATH = "check-in-progress"
 RESULT_PAGES = [
     ("email-collection", ResultCategory.FIBER_AVAILABLE, "Fiber", "available, email collection step"),
+    ("call-ris", ResultCategory.FIBER_AVAILABLE, "Fiber", "call-to-order page (A/B variant), serviceable"),
     ("existing-account", ResultCategory.EXISTING_CUSTOMER, "", "address already has Kinetic service"),
     ("complete-address", ResultCategory.UNABLE_TO_VERIFY, "", "address incomplete or zip/state mismatch"),
 ]
@@ -66,28 +64,12 @@ class KineticChecker(ProviderChecker):
 
     def _ensure_session(self) -> BrowserSession:
         if self._session is None:
-            self._session = launch_persistent_session(
-                os.path.abspath(PROFILE_DIR), headless=self.headless, proxy=self.proxy)
-            self._warm()
+            self._session = launch_session(headless=self.headless, proxy=self.proxy)
         return self._session
 
     def _rotate(self, attempt: int) -> None:
         self.close()
-        self._session = launch_persistent_session(
-            os.path.abspath(PROFILE_DIR), headless=self.headless, proxy=self.proxy)
-        self._warm()
-
-    def _warm(self) -> None:
-        """Visit the homepage and accept the cookie banner so the session looks
-        like a returning visitor. A cold session is routed to /call-ris."""
-        page = self._session.page
-        try:
-            page.goto(HOME_URL, wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(2500)
-            self._accept_cookies(page)
-            page.wait_for_timeout(1500)
-        except Exception:
-            pass
+        self._session = launch_session(headless=self.headless, proxy=self.proxy)
 
     def _accept_cookies(self, page) -> None:
         for selector in COOKIE_ACCEPT:
