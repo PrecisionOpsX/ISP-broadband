@@ -1,0 +1,7 @@
+address_id,address_line1,unit,city,state,zip,note
+fro-avail-1,2080 Brier Crest Dr,,Davison,MI,48423,Fiber Available - confirmed live earlier (Frontier fiber)
+fro-avail-2,2187 Oak Shade Dr,,Davison,MI,48423,Fiber Available - likely (same Frontier area)
+fro-na-1,1234 Woodward Ave,,Detroit,MI,48226,Not Available candidate - Detroit is AT&T territory not Frontier
+fro-na-2,300 Monroe Ave NW,,Grand Rapids,MI,49503,Not Available candidate - check if outside Frontier footprint
+fro-uv-1,Main St,,Davison,MI,48423,Unable to Verify - no house number cannot resolve
+fro-uv-2,99999 Nonexistent Blvd,,Davison,MI,48423,Unable to Verify - nonexistent address will not resolve

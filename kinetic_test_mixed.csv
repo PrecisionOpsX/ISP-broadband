@@ -1,0 +1,8 @@
+address_id,address_line1,unit,city,state,zip,note
+kin-avail-1,58 Engle St,,Combs,KY,41729,Fiber Available - confirmed live earlier (Kinetic fiber town)
+kin-avail-2,334 Kentucky Blvd,,Hazard,KY,41701,Fiber Available - likely (Perry County Kinetic territory)
+kin-avail-3,82 Bailey St,,Combs,KY,41729,Fiber Available - likely (Kinetic fiber town)
+kin-na-1,1230 S 4th St,,Louisville,KY,40203,Not Available candidate - Louisville is AT&T/Charter territory not Windstream
+kin-na-2,801 Broadway,,Paducah,KY,42001,Not Available candidate - check if outside Kinetic local footprint
+kin-uv-1,Lick Br,,Combs,KY,41729,Unable to Verify - no house number cannot resolve
+kin-uv-2,99999 Nowhere Rd,,Hazard,KY,41701,Unable to Verify - nonexistent address will not resolve
