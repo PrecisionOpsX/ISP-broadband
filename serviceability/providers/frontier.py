@@ -20,14 +20,14 @@ from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy, with_retries
 
-BUY_URL = "https://frontier.com/buy"
 HOME_URL = "https://frontier.com/"
 ADDRESS_INPUT_SELECTOR = ("input[name='street-address'], input[placeholder*='address' i], "
                           "input[id*='street-address' i]")
 SUBMIT_BUTTON = ("button:has-text('Check Availability'), button:has-text('Availability'), "
                  "button[type='submit']")
 SERVICE_API_HINT = "/ol/api/v2/serviceability"
-BLOCK_MARKERS = ("Access Denied", "Pardon Our Interruption", "Request unsuccessful")
+BLOCK_MARKERS = ("access denied", "verizon information security",
+                 "pardon our interruption", "request unsuccessful")
 
 
 class FrontierChecker(ProviderChecker):
@@ -69,6 +69,8 @@ class FrontierChecker(ProviderChecker):
                                    raw_status="no_house_number",
                                    notes="address has no house number to match")
             bodies, matched = self._submit(session, address)
+            if self._blocked(session.page):
+                raise Blocked("Frontier blocked the result page (Verizon security)")
             if not matched:
                 # No dropdown suggestion matched the typed address, so Frontier
                 # has no serviceable record for it.
@@ -130,18 +132,27 @@ class FrontierChecker(ProviderChecker):
         return captured, True
 
     def _open_address_page(self, page) -> None:
-        """Open Frontier's address-entry page, preferring /buy and falling back
-        to the homepage. Raise if neither shows the address input."""
-        for url in (BUY_URL, HOME_URL):
-            self._safe_goto(page, url)
-            if any(marker in page.content() for marker in BLOCK_MARKERS):
-                raise Blocked("Frontier challenge on load")
-            try:
-                page.wait_for_selector(ADDRESS_INPUT_SELECTOR, timeout=6000)
-                return
-            except Exception:
-                continue
-        raise Blocked("Frontier address input not found")
+        """Open the Frontier homepage and confirm the address box is present.
+
+        We deliberately do NOT deep-link to /buy. Navigating straight to /buy
+        trips Frontier's "Access denied, Verizon Information Security Policy"
+        block; entering from the homepage and letting the site route to /buy
+        itself does not.
+        """
+        self._safe_goto(page, HOME_URL)
+        if self._blocked(page):
+            raise Blocked("Frontier access blocked (Verizon security policy)")
+        try:
+            page.wait_for_selector(ADDRESS_INPUT_SELECTOR, timeout=8000)
+        except Exception:
+            raise Blocked("Frontier address input not found (possible block)")
+
+    @staticmethod
+    def _blocked(page) -> bool:
+        try:
+            return any(marker in page.content().lower() for marker in BLOCK_MARKERS)
+        except Exception:
+            return False
 
     def _matching_suggestion(self, page, address: AddressInput):
         """Return the dropdown element that matches the typed address, or None.
