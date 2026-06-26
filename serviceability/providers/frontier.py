@@ -2,14 +2,14 @@
 
 Flow confirmed by hand-testing the real site:
 
-1. Open frontier.com and close any popup.
-2. Type the address into the hero field (input[name='street-address']) so the
-   autocomplete dropdown opens.
+1. Open frontier.com/buy directly and close any popup. It has its own address
+   field and a "Check Availability" button.
+2. Paste the whole address at once so the autocomplete API fires a single time,
+   then wait through the "Loading..." state until the dropdown opens.
 3. If no suggestion exactly matches the typed address (same house number, city,
    state, zip), the address is not recognized, so it is Unable to Verify.
-4. If a suggestion matches, select it. That enables the "Go" button; click it,
-   which routes to frontier.com/buy.
-5. The /buy page auto-shows a result. Read which result it is:
+4. If a suggestion matches, select it and click Check Availability.
+5. The /buy page shows the result. Read which result it is:
    - "currently has Frontier service" / "View plans" / "Are you moving to this
      address" -> Fiber Available
    - "not available at this address" / Allconnect referral -> Not Available
@@ -30,10 +30,11 @@ from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy, with_retries
 
-HOME_URL = "https://frontier.com/"
-ADDRESS_INPUT = "input[name='street-address']"
-GO_BUTTON = ("button:has-text('Go'), button:has-text('GO'), "
-             "button:has-text('Check Availability')")
+BUY_URL = "https://frontier.com/buy"
+ADDRESS_INPUT = ("input[name='street-address'], input[placeholder*='address' i], "
+                 "input[id*='address' i]")
+GO_BUTTON = ("button:has-text('Check Availability'), button:has-text('Go'), "
+             "button:has-text('GO')")
 POPUP_CLOSE = ("button:has-text('Close')", "button[aria-label*='close' i]",
                "[role=dialog] button[aria-label*='close' i]",
                "button:has-text('No thanks')", "button:has-text('Maybe later')")
@@ -101,7 +102,7 @@ class FrontierChecker(ProviderChecker):
                                raw_status="no_house_number",
                                notes="address has no house number to match")
 
-        self._open_homepage(page)
+        self._open_buy(page)
         if not self._type_and_select(page, address):
             return CheckResult(address=address, provider=self.name,
                                category=ResultCategory.UNABLE_TO_VERIFY,
@@ -109,8 +110,8 @@ class FrontierChecker(ProviderChecker):
                                notes="no matching address in the Frontier autocomplete")
         return self._read_buy(page, address)
 
-    def _open_homepage(self, page) -> None:
-        self._safe_goto(page, HOME_URL)
+    def _open_buy(self, page) -> None:
+        self._safe_goto(page, BUY_URL)
         if self._blocked(page):
             raise Blocked("Frontier access blocked (Verizon security policy)")
         self._close_popups(page)
@@ -126,10 +127,11 @@ class FrontierChecker(ProviderChecker):
         try:
             inp.scroll_into_view_if_needed(timeout=4000)
             inp.click(timeout=4000)
-            inp.fill("")
+            # Paste the whole address at once so the autocomplete API fires a
+            # single time, rather than on every keystroke.
+            inp.fill(address.single_line())
         except Exception:
             return False
-        self._human_type(page, address.single_line())
         match = self._wait_for_match(page, address)
         if match is None:
             return False
@@ -141,15 +143,11 @@ class FrontierChecker(ProviderChecker):
                 match.click(timeout=3000)
             except Exception:
                 return False
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(1000)
         try:
             page.click(GO_BUTTON, timeout=5000)
         except Exception:
             page.keyboard.press("Enter")
-        try:
-            page.wait_for_url("**frontier.com/buy**", timeout=15000)
-        except Exception:
-            pass
         return True
 
     def _read_buy(self, page, address: AddressInput) -> CheckResult:
@@ -204,8 +202,10 @@ class FrontierChecker(ProviderChecker):
         """Wait for the autocomplete dropdown to populate (it loads from an API,
         so it lags the keystrokes), then return the element that exactly matches
         the typed address, or None if the populated list has no match."""
+        # The dropdown shows a "Loading..." state first (no address rows), so we
+        # poll until real address rows appear, which means loading has finished.
         suggestions = []
-        for _ in range(24):  # up to ~12s for the API-backed dropdown to appear
+        for _ in range(30):  # up to ~15s for the API-backed dropdown to load
             suggestions = self._suggestions(page)
             if suggestions:
                 break
@@ -291,11 +291,6 @@ class FrontierChecker(ProviderChecker):
             return any(marker in page.content().lower() for marker in BLOCK_MARKERS)
         except Exception:
             return False
-
-    def _human_type(self, page, text: str) -> None:
-        for ch in text:
-            page.keyboard.type(ch)
-            page.wait_for_timeout(random.randint(45, 130))
 
     def _mouse_click(self, page, target) -> None:
         try:
