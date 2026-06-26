@@ -130,13 +130,7 @@ class FrontierChecker(ProviderChecker):
         except Exception:
             return False
         self._human_type(page, address.single_line())
-        page.wait_for_timeout(2800)  # let the autocomplete populate
-
-        match = None
-        for text, element in self._suggestions(page):
-            if self._exact_match(text, address):
-                match = element
-                break
+        match = self._wait_for_match(page, address)
         if match is None:
             return False
 
@@ -204,6 +198,24 @@ class FrontierChecker(ProviderChecker):
             if any(m in text for m in TECHNICAL_MARKERS):
                 return "technical"
             page.wait_for_timeout(500)
+        return None
+
+    def _wait_for_match(self, page, address: AddressInput):
+        """Wait for the autocomplete dropdown to populate (it loads from an API,
+        so it lags the keystrokes), then return the element that exactly matches
+        the typed address, or None if the populated list has no match."""
+        suggestions = []
+        for _ in range(24):  # up to ~12s for the API-backed dropdown to appear
+            suggestions = self._suggestions(page)
+            if suggestions:
+                break
+            page.wait_for_timeout(500)
+        if not suggestions:
+            return None
+        page.wait_for_timeout(900)  # let the rest of the list settle
+        for text, element in self._suggestions(page):
+            if self._exact_match(text, address):
+                return element
         return None
 
     def _suggestions(self, page):
