@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS results (
     matched_address TEXT,
     raw_status TEXT,
     notes TEXT,
+    final_url TEXT,
     checked_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_results_lookup
@@ -44,6 +45,11 @@ class ResultStore:
             os.makedirs(parent, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            # Add columns introduced after a database was first created.
+            try:
+                conn.execute("ALTER TABLE results ADD COLUMN final_url TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already present
 
     @contextmanager
     def _conn(self):

@@ -76,6 +76,7 @@ class CheckResult:
     matched_address: str = ""
     raw_status: str = ""
     notes: str = ""
+    final_url: str = ""  # the result page the verdict was read from
 
     def to_row(self) -> dict:
         """Flatten to the unified CSV/database row shape."""
@@ -93,6 +94,7 @@ class CheckResult:
             "matched_address": self.matched_address,
             "raw_status": self.raw_status,
             "notes": self.notes,
+            "final_url": self.final_url,
             "checked_at": self.checked_at.astimezone(timezone.utc).isoformat(),
         }
 
@@ -112,5 +114,6 @@ CSV_COLUMNS = [
     "matched_address",
     "raw_status",
     "notes",
+    "final_url",
     "checked_at",
 ]

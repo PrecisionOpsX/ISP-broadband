@@ -120,7 +120,15 @@ class AttChecker(ProviderChecker):
                 raise Blocked(f"AT&T status {response['status']}")
             return self._interpret(address, response["body"])
 
-        return with_retries(self.pacing, do_check, on_block=self._rotate)
+        result = with_retries(self.pacing, do_check, on_block=self._rotate)
+        result.final_url = self._current_url()
+        return result
+
+    def _current_url(self) -> str:
+        try:
+            return self._session.page.url
+        except Exception:
+            return ""
 
     def _interpret(self, address: AddressInput, body: str) -> CheckResult:
         try:

@@ -88,15 +88,24 @@ class KineticChecker(ProviderChecker):
         # a clear note beats spawning a fresh browser on every retry.
         if self.proxy is None:
             try:
-                return self._attempt(address)
+                result = self._attempt(address)
             except Exception as exc:
-                return CheckResult(
+                result = CheckResult(
                     address=address, provider=self.name,
                     category=ResultCategory.UNABLE_TO_VERIFY, raw_status="error",
                     notes=str(exc)[:250],
                 )
+        else:
+            result = with_retries(self.pacing, lambda: self._attempt(address),
+                                  on_block=self._rotate)
+        result.final_url = self._current_url()
+        return result
 
-        return with_retries(self.pacing, lambda: self._attempt(address), on_block=self._rotate)
+    def _current_url(self) -> str:
+        try:
+            return self._session.page.url
+        except Exception:
+            return ""
 
     def _attempt(self, address: AddressInput) -> CheckResult:
         session = self._ensure_session()

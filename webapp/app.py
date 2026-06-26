@@ -70,11 +70,15 @@ def run_job(job_id: str, source_path: str, provider: str, mock: bool,
                     job["done"] += 1
                     key = result.category.value
                     job["counts"][key] = job["counts"].get(key, 0) + 1
+                    reason = result.raw_status or ""
+                    if result.notes:
+                        reason = f"{reason}: {result.notes}" if reason else result.notes
                     job["rows"].append({
                         "address": address.single_line(),
                         "provider": checker.name,
                         "category": key,
-                        "reason": (result.notes or result.raw_status or "")[:160],
+                        "result_url": result.final_url,
+                        "reason": reason[:200],
                     })
             finally:
                 checker.close()
@@ -225,10 +229,11 @@ async function tick(){
     html += '<h3 style="font-size:15px;margin:22px 0 6px">Per-address log ('+j.rows.length+')</h3>';
     html += '<div style="max-height:360px;overflow:auto;border:1px solid #eee;border-radius:6px">';
     html += '<table style="margin:0;font-size:13px"><tr>'+
-            '<th>#</th><th>Address</th><th>Category</th><th>Reason</th></tr>';
+            '<th>#</th><th>Address</th><th>Category</th><th>Result URL</th><th>Reason</th></tr>';
     j.rows.forEach((r,i)=>{
       html += '<tr><td class="muted">'+(i+1)+'</td><td>'+esc(r.address)+'</td>'+
               '<td style="color:'+catColor(r.category)+'">'+esc(r.category)+'</td>'+
+              '<td class="muted" style="word-break:break-all">'+esc(r.result_url||'')+'</td>'+
               '<td class="muted">'+esc(r.reason)+'</td></tr>';
     });
     html += '</table></div>';

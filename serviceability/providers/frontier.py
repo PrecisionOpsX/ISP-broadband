@@ -20,8 +20,10 @@ from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy, with_retries
 
+BUY_URL = "https://frontier.com/buy"
 HOME_URL = "https://frontier.com/"
-ADDRESS_INPUT_SELECTOR = "input[name='street-address']"
+ADDRESS_INPUT_SELECTOR = ("input[name='street-address'], input[placeholder*='address' i], "
+                          "input[id*='street-address' i]")
 SUBMIT_BUTTON = ("button:has-text('Check Availability'), button:has-text('Availability'), "
                  "button[type='submit']")
 SERVICE_API_HINT = "/ol/api/v2/serviceability"
@@ -60,16 +62,39 @@ class FrontierChecker(ProviderChecker):
 
         def do_check() -> CheckResult:
             session = self._ensure_session()
-            bodies, page = self._submit(session, address)
+            line1 = address.address_line1.strip()
+            if not line1 or not line1[0].isdigit():
+                return CheckResult(address=address, provider=self.name,
+                                   category=ResultCategory.UNABLE_TO_VERIFY,
+                                   raw_status="no_house_number",
+                                   notes="address has no house number to match")
+            bodies, matched = self._submit(session, address)
+            if not matched:
+                # No dropdown suggestion matched the typed address, so Frontier
+                # has no serviceable record for it.
+                return CheckResult(address=address, provider=self.name,
+                                   category=ResultCategory.NOT_AVAILABLE,
+                                   raw_status="no_match",
+                                   notes="no matching Frontier address in the lookup")
             for body in bodies:
                 verdict = self._interpret_json(address, body)
                 if verdict is not None:
                     return verdict
-            return self._interpret_dom(address, page.content())
+            return self._interpret_dom(address, session.page.content())
 
-        return with_retries(self.pacing, do_check, on_block=self._rotate)
+        result = with_retries(self.pacing, do_check, on_block=self._rotate)
+        result.final_url = self._current_url()
+        return result
+
+    def _current_url(self) -> str:
+        try:
+            return self._session.page.url
+        except Exception:
+            return ""
 
     def _submit(self, session: BrowserSession, address: AddressInput):
+        """Type the address and only proceed if a dropdown suggestion actually
+        matches it. Returns (captured serviceability bodies, matched flag)."""
         page = session.page
         captured: list[str] = []
 
@@ -81,22 +106,69 @@ class FrontierChecker(ProviderChecker):
                     pass
 
         page.on("response", record)
-        self._safe_goto(page, HOME_URL)
-        if any(marker in page.content() for marker in BLOCK_MARKERS):
-            raise Blocked("Frontier challenge on load")
+        self._open_address_page(page)
 
         page.click(ADDRESS_INPUT_SELECTOR)
         for ch in address.single_line():
             page.keyboard.type(ch)
-            page.wait_for_timeout(60)
-        page.wait_for_timeout(3000)
-        self._pick_suggestion(page, address)
+            page.wait_for_timeout(55)
+        page.wait_for_timeout(3000)  # let the suggestion dropdown populate
+
+        match = self._matching_suggestion(page, address)
+        if match is None:
+            return captured, False
+        try:
+            match.click(timeout=5000)
+        except Exception:
+            return captured, False
+
         self._submit_button(page)
         for _ in range(24):
             if captured:
                 break
             page.wait_for_timeout(500)
-        return captured, page
+        return captured, True
+
+    def _open_address_page(self, page) -> None:
+        """Open Frontier's address-entry page, preferring /buy and falling back
+        to the homepage. Raise if neither shows the address input."""
+        for url in (BUY_URL, HOME_URL):
+            self._safe_goto(page, url)
+            if any(marker in page.content() for marker in BLOCK_MARKERS):
+                raise Blocked("Frontier challenge on load")
+            try:
+                page.wait_for_selector(ADDRESS_INPUT_SELECTOR, timeout=6000)
+                return
+            except Exception:
+                continue
+        raise Blocked("Frontier address input not found")
+
+    def _matching_suggestion(self, page, address: AddressInput):
+        """Return the dropdown element that matches the typed address, or None.
+
+        A match must contain the house number and a street-name word, so a
+        nonexistent or out-of-area address (which the dropdown does not list) is
+        never silently resolved to some other address.
+        """
+        tokens = address.address_line1.lower().split()
+        if not tokens:
+            return None
+        house = tokens[0]
+        street_words = [w for w in tokens[1:] if len(w) > 2]
+        selector = ("li, [role=option], [class*=suggest i], [class*=result i], "
+                    "[class*=typeahead i] *, [class*=autocomplete i] *")
+        seen = set()
+        for element in page.query_selector_all(selector):
+            try:
+                text = element.inner_text().lower().strip()
+            except Exception:
+                continue
+            if not text or len(text) > 140 or text in seen:
+                continue
+            seen.add(text)
+            if house in text and (not street_words or any(w in text for w in street_words)):
+                return element
+        return None
 
     def _safe_goto(self, page, url: str) -> None:
         """frontier.com occasionally aborts its own load when the page is reused
@@ -113,17 +185,6 @@ class FrontierChecker(ProviderChecker):
                     continue
                 raise
         raise Blocked(f"Frontier navigation kept aborting: {last}")
-
-    def _pick_suggestion(self, page, address: AddressInput) -> None:
-        try:
-            page.get_by_text(address.address_line1.strip(), exact=False).first.click(timeout=5000)
-        except Exception:
-            try:
-                page.keyboard.press("ArrowDown")
-                page.wait_for_timeout(400)
-                page.keyboard.press("Enter")
-            except Exception:
-                pass
 
     def _submit_button(self, page) -> None:
         try:
