@@ -1,0 +1,28 @@
+# Local config with Bright Data credentials. This file is gitignored, so it is
+# never committed. Rotate these zone passwords in Bright Data periodically.
+
+headless: true
+db_path: data/serviceability.db
+request_timeout_seconds: 30
+
+# Bright Data rotating residential proxy (US) for Kinetic. A new IP per request
+# clears the /call-ris rate-limit page.
+proxies:
+  - http://brd-customer-hl_2c416794-zone-kinetic_res:91yt46p3kqvd@brd.superproxy.io:33335
+
+# Bright Data Scraping Browser (Web Browser API) for Frontier. The remote browser
+# handles the Verizon WAF and rotates IPs. cdp_endpoint takes precedence over a
+# local browser/proxy in the Frontier checker.
+unblocker:
+  enabled: true
+  provider: brightdata
+  cdp_endpoint: "wss://brd-customer-hl_2c416794-zone-isp_scrapping:95di6lkom8fc@brd.superproxy.io:9222"
+
+# Brisk pacing is fine since the proxy rotates IPs and the scraping browser is
+# managed. Tighten if you see rate limits.
+pacing:
+  min_delay_seconds: 1.0
+  max_delay_seconds: 2.0
+  max_retries: 4
+  backoff_base_seconds: 5.0
+  backoff_cap_seconds: 90.0

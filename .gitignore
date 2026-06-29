@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
-config.yaml
+# config.yaml
 data/
 .venv/
 venv/
