@@ -62,20 +62,27 @@ class FrontierChecker(ProviderChecker):
     })
 
     def __init__(self, headless: bool = True, proxy: str | None = None,
-                 pacing: PacingPolicy | None = None):
+                 pacing: PacingPolicy | None = None, unblocker=None):
         self.headless = headless
-        self.proxy = proxy
         self.pacing = pacing or PacingPolicy()
+        # A Scraping Browser (CDP) is preferred for Frontier's WAF; otherwise a
+        # proxy-mode unblocker; otherwise the plain proxy passed in.
+        self._cdp = unblocker.cdp() if unblocker else None
+        self.proxy = (unblocker.browser_proxy() if unblocker else None) or proxy
         self._session: BrowserSession | None = None
+
+    def _new_session(self) -> BrowserSession:
+        return launch_session(headless=self.headless, proxy=self.proxy,
+                              cdp_endpoint=self._cdp)
 
     def _ensure_session(self) -> BrowserSession:
         if self._session is None:
-            self._session = launch_session(headless=self.headless, proxy=self.proxy)
+            self._session = self._new_session()
         return self._session
 
     def _rotate(self, attempt: int) -> None:
         self.close()
-        self._session = launch_session(headless=self.headless, proxy=self.proxy)
+        self._session = self._new_session()
 
     def check(self, address: AddressInput) -> CheckResult:
         self.pacing.wait_between_requests()

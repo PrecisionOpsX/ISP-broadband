@@ -18,7 +18,7 @@ import json
 import random
 from urllib.parse import urlparse
 
-from ..browser import BrowserSession, launch_session, random_fingerprint
+from ..browser import BrowserSession, launch_session, proxy_with_session, random_fingerprint
 from ..interface import ProviderChecker
 from ..models import AddressInput, CheckResult, ResultCategory
 from ..pacing import Blocked, PacingPolicy
@@ -81,8 +81,14 @@ class KineticChecker(ProviderChecker):
         for attempt in range(attempts):
             session = None
             try:
-                session = launch_session(headless=self.headless, proxy=self.proxy,
-                                         fingerprint=random_fingerprint())
+                # A fresh sticky IP per attempt: stable within this check, new for
+                # the next one (and a new one when retrying past /call-ris).
+                proxy = self.proxy
+                if proxy:
+                    proxy = proxy_with_session(proxy, f"{random.randint(0, 2**31):x}")
+                session = launch_session(headless=self.headless, proxy=proxy,
+                                         fingerprint=random_fingerprint(),
+                                         ignore_https_errors=bool(proxy))
                 result = self._run(session, address)
                 result.final_url = session.page.url
             except Exception as exc:

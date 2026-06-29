@@ -65,7 +65,7 @@ def build_checkers(provider: str, mock: bool, config, addresses):
                                        pacing=config.pacing))
     if provider in ("frontier", "all"):
         checkers.append(FrontierChecker(headless=config.headless, proxy=config.next_proxy(),
-                                        pacing=config.pacing))
+                                        pacing=config.pacing, unblocker=config.unblocker))
     if provider in ("att", "all"):
         checkers.append(AttChecker(headless=config.headless, proxy=config.next_proxy(),
                                    pacing=config.pacing, unblocker=config.unblocker))

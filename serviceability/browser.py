@@ -91,6 +91,23 @@ class BrowserSession:
             pass
 
 
+def proxy_with_session(proxy: str, session_id: str) -> str:
+    """Pin one exit IP to this request by adding a session id to the username of
+    a Bright Data style residential endpoint. A new session id yields a new IP,
+    so the IP is stable within one check but fresh for the next one. Non Bright
+    Data proxies are returned unchanged.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(proxy if "://" in proxy else "http://" + proxy)
+    user = parsed.username or ""
+    if "zone-" not in user:
+        return proxy
+    if "-country-" not in user:
+        user = f"{user}-country-us"
+    user = f"{user}-session-{session_id}"
+    return f"{parsed.scheme}://{user}:{parsed.password or ''}@{parsed.hostname}:{parsed.port}"
+
+
 def _proxy_config(proxy: str) -> dict:
     """Turn a proxy URL into Playwright's proxy dict.
 
@@ -117,9 +134,21 @@ def require_playwright() -> None:
 def launch_session(headless: bool = True, proxy: str | None = None,
                    user_agent: str = DEFAULT_UA,
                    ignore_https_errors: bool = False,
-                   fingerprint: dict | None = None) -> BrowserSession:
+                   fingerprint: dict | None = None,
+                   cdp_endpoint: str | None = None) -> BrowserSession:
     require_playwright()
     pw = sync_playwright().start()
+
+    # A Scraping Browser (Bright Data and similar) is a remote, already-unblocked
+    # browser we drive over CDP. It manages IP rotation and the anti-bot bypass,
+    # so we just connect and use it. Slower than local, hence the larger timeout.
+    if cdp_endpoint:
+        browser = pw.chromium.connect_over_cdp(cdp_endpoint, timeout=120000)
+        context = browser.contexts[0] if browser.contexts else browser.new_context()
+        page = context.new_page()
+        page.set_default_timeout(90000)
+        return BrowserSession(playwright=pw, browser=browser, context=context, page=page)
+
     base_args = {"headless": headless, "args": ["--disable-blink-features=AutomationControlled"]}
     if proxy:
         base_args["proxy"] = _proxy_config(proxy)

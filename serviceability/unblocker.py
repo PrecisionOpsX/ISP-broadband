@@ -17,22 +17,36 @@ from dataclasses import dataclass
 
 @dataclass
 class Unblocker:
-    """Configuration for a commercial unblocker proxy. Empty means disabled."""
+    """Configuration for a commercial unblocker. Empty means disabled.
+
+    Two shapes are supported. `proxy` is a Web Unlocker proxy string, used for
+    single-request targets like AT&T's API. `cdp_endpoint` is a Scraping Browser
+    websocket (wss://...), used for the interactive multi-step flows (Frontier),
+    where we drive a remote, already-unblocked browser with Playwright.
+    """
 
     provider: str = ""
-    proxy: str = ""        # e.g. http://user:pass@host:port from the vendor
+    proxy: str = ""          # e.g. http://user:pass@host:port (Web Unlocker)
+    cdp_endpoint: str = ""   # e.g. wss://...@brd.superproxy.io:9222 (Scraping Browser)
     enabled: bool = False
 
     def browser_proxy(self) -> str | None:
         """The proxy string to launch the browser through, or None if disabled."""
         return self.proxy if (self.enabled and self.proxy) else None
 
+    def cdp(self) -> str | None:
+        """The Scraping Browser websocket to connect to, or None if disabled."""
+        return self.cdp_endpoint if (self.enabled and self.cdp_endpoint) else None
+
 
 def from_config(data: dict | None) -> Unblocker:
     if not data:
         return Unblocker()
+    proxy = data.get("proxy", "")
+    cdp_endpoint = data.get("cdp_endpoint", "") or data.get("scraping_browser", "")
     return Unblocker(
         provider=data.get("provider", ""),
-        proxy=data.get("proxy", ""),
-        enabled=bool(data.get("enabled", False)) and bool(data.get("proxy")),
+        proxy=proxy,
+        cdp_endpoint=cdp_endpoint,
+        enabled=bool(data.get("enabled", False)) and bool(proxy or cdp_endpoint),
     )

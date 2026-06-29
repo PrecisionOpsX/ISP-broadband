@@ -18,10 +18,14 @@ pacing:
   backoff_base_seconds: 5.0
   backoff_cap_seconds: 90.0
 
-# Commercial unblocker for AT&T only (Akamai). Leave enabled false until you have
-# a key. When enabled, the AT&T checker routes its browser through this proxy.
-# Bright Data Web Unlocker and Oxylabs Web Unblocker both work as a proxy string.
+# Commercial unblocker for the heavily defended providers (AT&T Akamai, Frontier
+# Verizon WAF). Leave enabled false until you have a key. Two shapes:
+#   proxy        - a Web Unlocker proxy string (single-request targets, e.g. AT&T)
+#   cdp_endpoint - a Scraping Browser websocket (interactive flows, e.g. Frontier)
+# Set whichever your provider gives you; cdp_endpoint takes precedence when both
+# are present. The AT&T and Frontier checkers route through this automatically.
 unblocker:
   enabled: false
   provider: brightdata
-  proxy: ""   # e.g. http://brd-customer-XXXX-zone-YYYY:PASSWORD@brd.superproxy.io:22225
+  proxy: ""          # e.g. http://brd-customer-XXXX-zone-unlocker:PASS@brd.superproxy.io:33335
+  cdp_endpoint: ""   # e.g. wss://brd-customer-XXXX-zone-scraping_browser:PASS@brd.superproxy.io:9222
